@@ -69,7 +69,7 @@
 <section class=first id=overview>
     <h2 style="position: relative">
       User manual and reference guide
-      <span style="color: #888; font-size: 1rem; position: absolute; right: 0; bottom: 0">version 5.21.0</span>
+      <span style="color: #888; font-size: 1rem; position: absolute; right: 0; bottom: 0">version 5.21.1</span>
     </h2>
 
     <p>CodeMirror is a code-editor component that can be embedded in
@@ -2760,12 +2760,20 @@ editor.setOption("extraKeys", {
       like in <a href="../demo/markselection.html">this demo</a>.</dd>
 
       <dt id="addon_active-line"><a href="../addon/selection/active-line.js"><code>selection/active-line.js</code></a></dt>
-      <dd>Defines a <code>styleActiveLine</code> option that, when enabled,
-      gives the wrapper of the active line the class <code>CodeMirror-activeline</code>,
-      adds a background with the class <code>CodeMirror-activeline-background</code>,
-      and adds the class <code>CodeMirror-activeline-gutter</code> to the
-      line's gutter space is enabled. See the
-      <a href="../demo/activeline.html">demo</a>.</dd>
+      <dd>Defines a <code>styleActiveLine</code> option that, when
+      enabled, gives the wrapper of the line that contains the cursor
+      the class <code>CodeMirror-activeline</code>, adds a background
+      with the class <code>CodeMirror-activeline-background</code>,
+      and adds the class <code>CodeMirror-activeline-gutter</code> to
+      the line's gutter space is enabled. The option's value may be a
+      boolean or an object specifying the following options:
+        <dl>
+          <dt><code><strong>nonEmpty</strong>: bool</code></dt>
+          <dd>Controls whether single-line selections, or just cursor
+          selections, are styled. Defaults to false (only cursor
+          selections).</dd>
+        </dl>
+      See the <a href="../demo/activeline.html">demo</a>.</dd>
 
       <dt id="addon_selection-pointer"><a href="../addon/selection/selection-pointer.js"><code>selection/selection-pointer.js</code></a></dt>
       <dd>Defines a <code>selectionPointer</code> option which you can
