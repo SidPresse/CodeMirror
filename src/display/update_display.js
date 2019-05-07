@@ -1,44 +1,46 @@
-import { sawCollapsedSpans } from "../line/saw_special_spans"
-import { heightAtLine, visualLineEndNo, visualLineNo } from "../line/spans"
-import { getLine, lineNumberFor } from "../line/utils_line"
-import { displayHeight, displayWidth, getDimensions, paddingVert, scrollGap } from "../measurement/position_measurement"
-import { mac, webkit } from "../util/browser"
-import { activeElt, removeChildren } from "../util/dom"
-import { hasHandler, signal } from "../util/event"
-import { indexOf } from "../util/misc"
+import { sawCollapsedSpans } from "../line/saw_special_spans.js"
+import { heightAtLine, visualLineEndNo, visualLineNo } from "../line/spans.js"
+import { getLine, lineNumberFor } from "../line/utils_line.js"
+import { displayHeight, displayWidth, getDimensions, paddingVert, scrollGap } from "../measurement/position_measurement.js"
+import { mac, webkit } from "../util/browser.js"
+import { activeElt, removeChildren, contains } from "../util/dom.js"
+import { hasHandler, signal } from "../util/event.js"
+import { indexOf } from "../util/misc.js"
 
-import { buildLineElement, updateLineForChanges } from "./update_line"
-import { startWorker } from "./highlight_worker"
-import { maybeUpdateLineNumberWidth } from "./line_numbers"
-import { measureForScrollbars, updateScrollbars } from "./scrollbars"
-import { updateSelection } from "./selection"
-import { updateHeightsInViewport, visibleLines } from "./update_lines"
-import { adjustView, countDirtyView, resetView } from "./view_tracking"
+import { buildLineElement, updateLineForChanges } from "./update_line.js"
+import { startWorker } from "./highlight_worker.js"
+import { maybeUpdateLineNumberWidth } from "./line_numbers.js"
+import { measureForScrollbars, updateScrollbars } from "./scrollbars.js"
+import { updateSelection } from "./selection.js"
+import { updateHeightsInViewport, visibleLines } from "./update_lines.js"
+import { adjustView, countDirtyView, resetView } from "./view_tracking.js"
 
 // DISPLAY DRAWING
 
-export function DisplayUpdate(cm, viewport, force) {
-  let display = cm.display
+export class DisplayUpdate {
+  constructor(cm, viewport, force) {
+    let display = cm.display
 
-  this.viewport = viewport
-  // Store some values that we'll need later (but don't want to force a relayout for)
-  this.visible = visibleLines(display, cm.doc, viewport)
-  this.editorIsHidden = !display.wrapper.offsetWidth
-  this.wrapperHeight = display.wrapper.clientHeight
-  this.wrapperWidth = display.wrapper.clientWidth
-  this.oldDisplayWidth = displayWidth(cm)
-  this.force = force
-  this.dims = getDimensions(cm)
-  this.events = []
-}
+    this.viewport = viewport
+    // Store some values that we'll need later (but don't want to force a relayout for)
+    this.visible = visibleLines(display, cm.doc, viewport)
+    this.editorIsHidden = !display.wrapper.offsetWidth
+    this.wrapperHeight = display.wrapper.clientHeight
+    this.wrapperWidth = display.wrapper.clientWidth
+    this.oldDisplayWidth = displayWidth(cm)
+    this.force = force
+    this.dims = getDimensions(cm)
+    this.events = []
+  }
 
-DisplayUpdate.prototype.signal = function(emitter, type) {
-  if (hasHandler(emitter, type))
-    this.events.push(arguments)
-}
-DisplayUpdate.prototype.finish = function() {
-  for (let i = 0; i < this.events.length; i++)
-    signal.apply(null, this.events[i])
+  signal(emitter, type) {
+    if (hasHandler(emitter, type))
+      this.events.push(arguments)
+  }
+  finish() {
+    for (let i = 0; i < this.events.length; i++)
+      signal.apply(null, this.events[i])
+  }
 }
 
 export function maybeClipScrollbars(cm) {
@@ -49,6 +51,36 @@ export function maybeClipScrollbars(cm) {
     display.sizer.style.marginBottom = -display.nativeBarWidth + "px"
     display.sizer.style.borderRightWidth = scrollGap(cm) + "px"
     display.scrollbarsClipped = true
+  }
+}
+
+function selectionSnapshot(cm) {
+  if (cm.hasFocus()) return null
+  let active = activeElt()
+  if (!active || !contains(cm.display.lineDiv, active)) return null
+  let result = {activeElt: active}
+  if (window.getSelection) {
+    let sel = window.getSelection()
+    if (sel.anchorNode && sel.extend && contains(cm.display.lineDiv, sel.anchorNode)) {
+      result.anchorNode = sel.anchorNode
+      result.anchorOffset = sel.anchorOffset
+      result.focusNode = sel.focusNode
+      result.focusOffset = sel.focusOffset
+    }
+  }
+  return result
+}
+
+function restoreSelection(snapshot) {
+  if (!snapshot || !snapshot.activeElt || snapshot.activeElt == activeElt()) return
+  snapshot.activeElt.focus()
+  if (snapshot.anchorNode && contains(document.body, snapshot.anchorNode) && contains(document.body, snapshot.focusNode)) {
+    let sel = window.getSelection(), range = document.createRange()
+    range.setEnd(snapshot.anchorNode, snapshot.anchorOffset)
+    range.collapse(false)
+    sel.removeAllRanges()
+    sel.addRange(range)
+    sel.extend(snapshot.focusNode, snapshot.focusOffset)
   }
 }
 
@@ -101,14 +133,14 @@ export function updateDisplayIfNeeded(cm, update) {
 
   // For big changes, we hide the enclosing element during the
   // update, since that speeds up the operations on most browsers.
-  let focused = activeElt()
+  let selSnapshot = selectionSnapshot(cm)
   if (toUpdate > 4) display.lineDiv.style.display = "none"
   patchDisplay(cm, display.updateLineNumbers, update.dims)
   if (toUpdate > 4) display.lineDiv.style.display = ""
   display.renderedView = display.view
   // There might have been a widget with a focused element that got
   // hidden or updated, if so re-focus it.
-  if (focused && activeElt() != focused && focused.offsetHeight) focused.focus()
+  restoreSelection(selSnapshot)
 
   // Prevent selection and cursors from interfering with the scroll
   // width and height.
@@ -147,6 +179,7 @@ export function postUpdateDisplay(cm, update) {
     updateSelection(cm)
     updateScrollbars(cm, barMeasure)
     setDocumentHeight(cm, barMeasure)
+    update.force = false
   }
 
   update.signal(cm, "update", cm)
@@ -215,9 +248,9 @@ function patchDisplay(cm, updateNumbersFrom, dims) {
   while (cur) cur = rm(cur)
 }
 
-export function updateGutterSpace(cm) {
-  let width = cm.display.gutters.offsetWidth
-  cm.display.sizer.style.marginLeft = width + "px"
+export function updateGutterSpace(display) {
+  let width = display.gutters.offsetWidth
+  display.sizer.style.marginLeft = width + "px"
 }
 
 export function setDocumentHeight(cm, measure) {

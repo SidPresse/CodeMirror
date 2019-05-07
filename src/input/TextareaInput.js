@@ -1,47 +1,41 @@
-import { operation, runInOp } from "../display/operations"
-import { prepareSelection } from "../display/selection"
-import { applyTextInput, copyableRanges, handlePaste, hiddenTextarea, lastCopied, setLastCopied } from "./input"
-import { cursorCoords, posFromMouse } from "../measurement/position_measurement"
-import { eventInWidget } from "../measurement/widgets"
-import { simpleSelection } from "../model/selection"
-import { selectAll, setSelection } from "../model/selection_updates"
-import { captureRightClick, ie, ie_version, ios, mac, mobile, presto, webkit } from "../util/browser"
-import { activeElt, removeChildrenAndAdd, selectInput } from "../util/dom"
-import { e_preventDefault, e_stop, off, on, signalDOMEvent } from "../util/event"
-import { hasCopyEvent, hasSelection } from "../util/feature_detection"
-import { copyObj, Delayed, nothing, sel_dontScroll } from "../util/misc"
+import { operation, runInOp } from "../display/operations.js"
+import { prepareSelection } from "../display/selection.js"
+import { applyTextInput, copyableRanges, handlePaste, hiddenTextarea, setLastCopied } from "./input.js"
+import { cursorCoords, posFromMouse } from "../measurement/position_measurement.js"
+import { eventInWidget } from "../measurement/widgets.js"
+import { simpleSelection } from "../model/selection.js"
+import { selectAll, setSelection } from "../model/selection_updates.js"
+import { captureRightClick, ie, ie_version, ios, mac, mobile, presto, webkit } from "../util/browser.js"
+import { activeElt, removeChildrenAndAdd, selectInput } from "../util/dom.js"
+import { e_preventDefault, e_stop, off, on, signalDOMEvent } from "../util/event.js"
+import { hasSelection } from "../util/feature_detection.js"
+import { Delayed, sel_dontScroll } from "../util/misc.js"
 
 // TEXTAREA INPUT STYLE
 
-export default function TextareaInput(cm) {
-  this.cm = cm
-  // See input.poll and input.reset
-  this.prevInput = ""
+export default class TextareaInput {
+  constructor(cm) {
+    this.cm = cm
+    // See input.poll and input.reset
+    this.prevInput = ""
 
-  // Flag that indicates whether we expect input to appear real soon
-  // now (after some event like 'keypress' or 'input') and are
-  // polling intensively.
-  this.pollingFast = false
-  // Self-resetting timeout for the poller
-  this.polling = new Delayed()
-  // Tracks when input.reset has punted to just putting a short
-  // string into the textarea instead of the full selection.
-  this.inaccurateSelection = false
-  // Used to work around IE issue with selection being forgotten when focus moves away from textarea
-  this.hasSelection = false
-  this.composing = null
-}
+    // Flag that indicates whether we expect input to appear real soon
+    // now (after some event like 'keypress' or 'input') and are
+    // polling intensively.
+    this.pollingFast = false
+    // Self-resetting timeout for the poller
+    this.polling = new Delayed()
+    // Used to work around IE issue with selection being forgotten when focus moves away from textarea
+    this.hasSelection = false
+    this.composing = null
+  }
 
-TextareaInput.prototype = copyObj({
-  init: function(display) {
+  init(display) {
     let input = this, cm = this.cm
+    this.createField(display)
+    const te = this.textarea
 
-    // Wraps and hides input textarea
-    let div = this.wrapper = hiddenTextarea()
-    // The semihidden textarea that is focused when the editor is
-    // focused, and receives input.
-    let te = this.textarea = div.firstChild
-    display.wrapper.insertBefore(div, display.wrapper.firstChild)
+    display.wrapper.insertBefore(this.wrapper, display.wrapper.firstChild)
 
     // Needed to hide big blue blinking cursor on Mobile Safari (doesn't seem to work in iOS 8 anymore)
     if (ios) te.style.width = "0px"
@@ -54,7 +48,7 @@ TextareaInput.prototype = copyObj({
     on(te, "paste", e => {
       if (signalDOMEvent(cm, e) || handlePaste(e, cm)) return
 
-      cm.state.pasteIncoming = true
+      cm.state.pasteIncoming = +new Date
       input.fastPoll()
     })
 
@@ -62,12 +56,6 @@ TextareaInput.prototype = copyObj({
       if (signalDOMEvent(cm, e)) return
       if (cm.somethingSelected()) {
         setLastCopied({lineWise: false, text: cm.getSelections()})
-        if (input.inaccurateSelection) {
-          input.prevInput = ""
-          input.inaccurateSelection = false
-          te.value = lastCopied.text.join("\n")
-          selectInput(te)
-        }
       } else if (!cm.options.lineWiseCopyCut) {
         return
       } else {
@@ -81,15 +69,23 @@ TextareaInput.prototype = copyObj({
           selectInput(te)
         }
       }
-      if (e.type == "cut") cm.state.cutIncoming = true
+      if (e.type == "cut") cm.state.cutIncoming = +new Date
     }
     on(te, "cut", prepareCopyCut)
     on(te, "copy", prepareCopyCut)
 
     on(display.scroller, "paste", e => {
       if (eventInWidget(display, e) || signalDOMEvent(cm, e)) return
-      cm.state.pasteIncoming = true
-      input.focus()
+      if (!te.dispatchEvent) {
+        cm.state.pasteIncoming = +new Date
+        input.focus()
+        return
+      }
+
+      // Pass the `paste` event to the textarea so it's handled by its event listener.
+      const event = new Event("paste")
+      event.clipboardData = e.clipboardData
+      te.dispatchEvent(event)
     })
 
     // Prevent normal selection in the editor (we handle our own)
@@ -112,9 +108,17 @@ TextareaInput.prototype = copyObj({
         input.composing = null
       }
     })
-  },
+  }
 
-  prepareSelection: function() {
+  createField(_display) {
+    // Wraps and hides input textarea
+    this.wrapper = hiddenTextarea()
+    // The semihidden textarea that is focused when the editor is
+    // focused, and receives input.
+    this.textarea = this.wrapper.firstChild
+  }
+
+  prepareSelection() {
     // Redraw the selection and/or cursor
     let cm = this.cm, display = cm.display, doc = cm.doc
     let result = prepareSelection(cm)
@@ -130,9 +134,9 @@ TextareaInput.prototype = copyObj({
     }
 
     return result
-  },
+  }
 
-  showSelection: function(drawn) {
+  showSelection(drawn) {
     let cm = this.cm, display = cm.display
     removeChildrenAndAdd(display.cursorDiv, drawn.cursors)
     removeChildrenAndAdd(display.selectionDiv, drawn.selection)
@@ -140,19 +144,16 @@ TextareaInput.prototype = copyObj({
       this.wrapper.style.top = drawn.teTop + "px"
       this.wrapper.style.left = drawn.teLeft + "px"
     }
-  },
+  }
 
   // Reset the input to correspond to the selection (or to be empty,
   // when not typing and nothing is selected)
-  reset: function(typing) {
-    if (this.contextMenuPending) return
-    let minimal, selected, cm = this.cm, doc = cm.doc
+  reset(typing) {
+    if (this.contextMenuPending || this.composing) return
+    let cm = this.cm
     if (cm.somethingSelected()) {
       this.prevInput = ""
-      let range = doc.sel.primary()
-      minimal = hasCopyEvent &&
-        (range.to().line - range.from().line > 100 || (selected = cm.getSelection()).length > 1000)
-      let content = minimal ? "-" : selected || cm.getSelection()
+      let content = cm.getSelection()
       this.textarea.value = content
       if (cm.state.focused) selectInput(this.textarea)
       if (ie && ie_version >= 9) this.hasSelection = content
@@ -160,42 +161,41 @@ TextareaInput.prototype = copyObj({
       this.prevInput = this.textarea.value = ""
       if (ie && ie_version >= 9) this.hasSelection = null
     }
-    this.inaccurateSelection = minimal
-  },
+  }
 
-  getField: function() { return this.textarea },
+  getField() { return this.textarea }
 
-  supportsTouch: function() { return false },
+  supportsTouch() { return false }
 
-  focus: function() {
+  focus() {
     if (this.cm.options.readOnly != "nocursor" && (!mobile || activeElt() != this.textarea)) {
       try { this.textarea.focus() }
       catch (e) {} // IE8 will throw if the textarea is display: none or not in DOM
     }
-  },
+  }
 
-  blur: function() { this.textarea.blur() },
+  blur() { this.textarea.blur() }
 
-  resetPosition: function() {
+  resetPosition() {
     this.wrapper.style.top = this.wrapper.style.left = 0
-  },
+  }
 
-  receivedFocus: function() { this.slowPoll() },
+  receivedFocus() { this.slowPoll() }
 
   // Poll for input changes, using the normal rate of polling. This
   // runs as long as the editor is focused.
-  slowPoll: function() {
+  slowPoll() {
     if (this.pollingFast) return
     this.polling.set(this.cm.options.pollInterval, () => {
       this.poll()
       if (this.cm.state.focused) this.slowPoll()
     })
-  },
+  }
 
   // When an event has just come in that is likely to add or change
   // something in the input textarea, we poll faster, to ensure that
   // the change appears on the screen quickly.
-  fastPoll: function() {
+  fastPoll() {
     let missed = false, input = this
     input.pollingFast = true
     function p() {
@@ -204,7 +204,7 @@ TextareaInput.prototype = copyObj({
       else {input.pollingFast = false; input.slowPoll()}
     }
     input.polling.set(20, p)
-  },
+  }
 
   // Read input from the textarea, and update the document to match.
   // When something is selected, it is present in the textarea, and
@@ -212,7 +212,7 @@ TextareaInput.prototype = copyObj({
   // used). When nothing is selected, the cursor sits after previously
   // seen text (can be empty), which is stored in prevInput (we must
   // not reset the textarea when typing, because that breaks IME).
-  poll: function() {
+  poll() {
     let cm = this.cm, input = this.textarea, prevInput = this.prevInput
     // Since this is called a *lot*, try to bail out as cheaply as
     // possible when it is clear that nothing happened. hasSelection
@@ -259,19 +259,20 @@ TextareaInput.prototype = copyObj({
       }
     })
     return true
-  },
+  }
 
-  ensurePolled: function() {
+  ensurePolled() {
     if (this.pollingFast && this.poll()) this.pollingFast = false
-  },
+  }
 
-  onKeyPress: function() {
+  onKeyPress() {
     if (ie && ie_version >= 9) this.hasSelection = null
     this.fastPoll()
-  },
+  }
 
-  onContextMenu: function(e) {
+  onContextMenu(e) {
     let input = this, cm = input.cm, display = cm.display, te = input.textarea
+    if (input.contextMenuPending) input.contextMenuPending()
     let pos = posFromMouse(cm, e), scrollPos = display.scroller.scrollTop
     if (!pos || presto) return // Opera is difficult.
 
@@ -282,8 +283,8 @@ TextareaInput.prototype = copyObj({
       operation(cm, setSelection)(cm.doc, simpleSelection(pos), sel_dontScroll)
 
     let oldCSS = te.style.cssText, oldWrapperCSS = input.wrapper.style.cssText
-    input.wrapper.style.cssText = "position: absolute"
-    let wrapperBox = input.wrapper.getBoundingClientRect()
+    let wrapperBox = input.wrapper.offsetParent.getBoundingClientRect()
+    input.wrapper.style.cssText = "position: static"
     te.style.cssText = `position: absolute; width: 30px; height: 30px;
       top: ${e.clientY - wrapperBox.top - 5}px; left: ${e.clientX - wrapperBox.left - 5}px;
       z-index: 1000; background: ${ie ? "rgba(255, 255, 255, .05)" : "transparent"};
@@ -295,7 +296,7 @@ TextareaInput.prototype = copyObj({
     display.input.reset()
     // Adds "Select all" to context menu in FF
     if (!cm.somethingSelected()) te.value = input.prevInput = " "
-    input.contextMenuPending = true
+    input.contextMenuPending = rehide
     display.selForContextMenu = cm.doc.sel
     clearTimeout(display.detectingSelectAll)
 
@@ -316,6 +317,7 @@ TextareaInput.prototype = copyObj({
       }
     }
     function rehide() {
+      if (input.contextMenuPending != rehide) return
       input.contextMenuPending = false
       input.wrapper.style.cssText = oldWrapperCSS
       te.style.cssText = oldCSS
@@ -326,10 +328,14 @@ TextareaInput.prototype = copyObj({
         if (!ie || (ie && ie_version < 9)) prepareSelectAllHack()
         let i = 0, poll = () => {
           if (display.selForContextMenu == cm.doc.sel && te.selectionStart == 0 &&
-              te.selectionEnd > 0 && input.prevInput == "\u200b")
+              te.selectionEnd > 0 && input.prevInput == "\u200b") {
             operation(cm, selectAll)(cm)
-          else if (i++ < 10) display.detectingSelectAll = setTimeout(poll, 500)
-          else display.input.reset()
+          } else if (i++ < 10) {
+            display.detectingSelectAll = setTimeout(poll, 500)
+          } else {
+            display.selForContextMenu = null
+            display.input.reset()
+          }
         }
         display.detectingSelectAll = setTimeout(poll, 200)
       }
@@ -346,13 +352,14 @@ TextareaInput.prototype = copyObj({
     } else {
       setTimeout(rehide, 50)
     }
-  },
+  }
 
-  readOnlyChanged: function(val) {
+  readOnlyChanged(val) {
     if (!val) this.reset()
-  },
+    this.textarea.disabled = val == "nocursor"
+  }
 
-  setUneditable: nothing,
+  setUneditable() {}
+}
 
-  needsContentAttribute: false
-}, TextareaInput.prototype)
+TextareaInput.prototype.needsContentAttribute = false
